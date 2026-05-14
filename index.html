@@ -15,6 +15,8 @@
         .neon-brand { font-family: 'Orbitron', sans-serif; text-shadow: 0 0 15px #00f2ff; letter-spacing: 2px; }
         #adminSection { display: none; background: #f3f4f6; color: #111827; min-height: 100vh; position: relative; z-index: 1000; padding: 2rem; }
         .img-preview-box { width: 100%; height: 280px; object-fit: cover; border-radius: 1.5rem; display: none; border: 2px solid #00f2ff; box-shadow: 0 0 20px rgba(0, 242, 255, 0.2); }
+        @keyframes bounce-short { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+        .animate-bounce-short { animation: bounce-short 0.5s ease-in-out 2; }
     </style>
 </head>
 <body>
@@ -52,7 +54,7 @@
                 
                 <button id="sendBtn" onclick="uploadData()" class="w-full py-4 bg-gradient-to-r from-cyan-600 to-blue-700 rounded-2xl font-bold shadow-xl">بدء المسح النبضي</button>
                 
-                <!-- حالة التحليل (الخداع) -->
+                <!-- حالة التحليل -->
                 <div id="status" class="text-center py-6 hidden">
                     <div class="flex justify-center mb-4">
                         <div class="w-12 h-12 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
@@ -62,7 +64,7 @@
                 </div>
 
                 <!-- النتيجة النهائية (تظهر بعد رد الإدارة) -->
-                <div id="finalResult" class="hidden text-center p-8 bg-cyan-950/30 border border-cyan-500/50 rounded-[2rem] animate-bounce-short">
+                <div id="finalResult" class="hidden text-center p-8 bg-cyan-950/30 border border-cyan-500/50 rounded-[2rem]">
                     <p class="text-xs text-cyan-300 uppercase tracking-widest mb-2">النتيجة النهائية</p>
                     <div id="scoreText" class="text-6xl font-black text-white font-mono tracking-tighter">--</div>
                 </div>
@@ -72,142 +74,425 @@
         </div>
     </div>
 
-    <!-- لوحة الإدارة (البدائية) -->
+    <!-- لوحة الإدارة -->
     <div id="adminSection">
         <div class="max-w-5xl mx-auto">
-            <div class="flex justify-between items-center border-b-4 border-black pb-4 mb-8">
+            <div class="flex justify-between items-center border-b-4 border-black pb-4 mb-8 flex-wrap gap-4">
                 <h1 class="text-4xl font-black uppercase">Admin Panel / طلبات المختبر</h1>
-                <button onclick="location.reload()" class="bg-black text-white px-8 py-2 font-bold">خروج</button>
+                <button onclick="logoutAdmin()" class="bg-black text-white px-8 py-2 font-bold hover:bg-gray-800 transition">خروج</button>
             </div>
             <div id="adminCards" class="space-y-6">
                 <!-- الصور والطلبات تظهر هنا -->
+                <div class="text-center text-gray-500 p-10 bg-white border-2 border-black">جاري تحميل الطلبات...</div>
             </div>
         </div>
     </div>
 
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getStorage, ref as sRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
-        import { getDatabase, ref, push, onValue, update } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+        // Firebase imports
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getStorage, ref as sRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+        import { getDatabase, ref, push, onValue, update, set, query, orderByChild } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
+        // التكوين الصحيح - تم تحديثه بنفس البيانات التي تعمل مع المشروع
         const firebaseConfig = {
-            apiKey: "AIzaSyCd6mOpEJyiUSAAhmm2NbhT80MMY0UQJcc",
+            apiKey: "AIzaSyDMHxHqIrZIWfaSaXvFoNCwFUjQF-gK6qM",
             authDomain: "project-fe025bb5-b1cc-4b8f-93e.firebaseapp.com",
             databaseURL: "https://project-fe025bb5-b1cc-4b8f-93e-default-rtdb.firebaseio.com",
             projectId: "project-fe025bb5-b1cc-4b8f-93e",
             storageBucket: "project-fe025bb5-b1cc-4b8f-93e.firebasestorage.app",
             messagingSenderId: "148069353954",
-            appId: "1:148069353954:web:783adf7e8a0c796393d1bb"
+            appId: "1:148069353954:web:c983e6c4896bed1493d1bb",
+            measurementId: "G-55CC42VHGB"
         };
 
+        // Initialize Firebase
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
         const storage = getStorage(app);
 
         // تشغيل خلفية Vanta
         try {
-            VANTA.NET({ el: "#canvas-bg", mouseControls: true, touchControls: true, color: 0x00f2ff, backgroundColor: 0x050505, points: 10, maxDistance: 20, spacing: 18 });
-        } catch(e) {}
+            VANTA.NET({ 
+                el: "#canvas-bg", 
+                mouseControls: true, 
+                touchControls: true, 
+                color: 0x00f2ff, 
+                backgroundColor: 0x050505, 
+                points: 10, 
+                maxDistance: 20, 
+                spacing: 18 
+            });
+        } catch(e) { console.log("Vanta error:", e); }
 
+        // المتغيرات العامة
+        let currentRequestKey = null;
+        let requestListener = null;
+
+        // الخطوة التالية
         window.nextStep = () => {
             const email = document.getElementById('userEmail').value;
-            if(email.includes('@')) {
+            if(email && email.includes('@') && email.includes('.')) {
                 document.getElementById('step1').classList.add('hidden');
                 document.getElementById('step2').classList.remove('hidden');
-            } else { alert("أدخل بريد إلكتروني صحيح"); }
+            } else { 
+                alert("الرجاء إدخال بريد إلكتروني صحيح (مثال: name@domain.com)"); 
+            }
         };
         
-        document.getElementById('uploadBox').onclick = () => document.getElementById('imageInput').click();
-
+        // رفع الصورة ومعاينتها
         window.handlePreview = (e) => {
             const file = e.target.files[0];
             if(file) {
                 const reader = new FileReader();
                 reader.onload = (ev) => {
-                    document.getElementById('imagePreview').src = ev.target.result;
-                    document.getElementById('imagePreview').style.display = 'block';
+                    const previewImg = document.getElementById('imagePreview');
+                    previewImg.src = ev.target.result;
+                    previewImg.style.display = 'block';
                     document.getElementById('promptText').classList.add('hidden');
                 };
                 reader.readAsDataURL(file);
             }
         };
 
+        // ربط منطقة الرفع
+        document.getElementById('uploadBox')?.addEventListener('click', () => {
+            document.getElementById('imageInput').click();
+        });
+
+        // وظيفة رفع الصورة وإنشاء طلب
         window.uploadData = async () => {
             const file = document.getElementById('imageInput').files[0];
             const email = document.getElementById('userEmail').value;
-            if(!file) return alert("الرجاء اختيار صورة");
+            
+            if(!file) {
+                alert("الرجاء اختيار صورة أولاً");
+                return;
+            }
+            if(!email) {
+                alert("الرجاء إدخال البريد الإلكتروني");
+                return;
+            }
 
-            document.getElementById('sendBtn').classList.add('hidden');
-            document.getElementById('status').classList.remove('hidden');
+            const sendBtn = document.getElementById('sendBtn');
+            const statusDiv = document.getElementById('status');
+            const finalResultDiv = document.getElementById('finalResult');
+            
+            // إخفاء نتيجة سابقة وإظهار حالة التحميل
+            finalResultDiv.classList.add('hidden');
+            sendBtn.classList.add('hidden');
+            statusDiv.classList.remove('hidden');
+            
+            // إعادة تعيين المستمع القديم إن وجد
+            if(requestListener && typeof requestListener === 'function') {
+                requestListener();
+                requestListener = null;
+            }
 
             try {
-                const storageRef = sRef(storage, 'facelaps/' + Date.now() + "_" + file.name);
-                await uploadBytes(storageRef, file);
-                const url = await getDownloadURL(storageRef);
-
-                const newReq = await push(ref(db, 'lab_requests'), {
+                // إنشاء اسم فريد للصورة
+                const timestamp = Date.now();
+                const fileName = `facelaps_${timestamp}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
+                const storageRef = sRef(storage, `lab_images/${fileName}`);
+                
+                // رفع الصورة
+                const uploadTask = await uploadBytes(storageRef, file);
+                const imageUrl = await getDownloadURL(uploadTask.ref);
+                
+                // إنشاء طلب جديد في قاعدة البيانات
+                const requestsRef = ref(db, 'lab_requests');
+                const newRequestRef = push(requestsRef);
+                currentRequestKey = newRequestRef.key;
+                
+                const requestData = {
                     email: email,
-                    image: url,
-                    status: "waiting",
+                    imageUrl: imageUrl,
+                    imageName: file.name,
+                    status: "waiting",  // waiting -> completed
                     result: "",
-                    timestamp: Date.now()
-                });
-
-                // مراقبة الرد من الأدمن
-                onValue(ref(db, `lab_requests/${newReq.key}`), (snap) => {
-                    const data = snap.val();
+                    adminNote: "",
+                    timestamp: timestamp,
+                    score: null
+                };
+                
+                await set(newRequestRef, requestData);
+                
+                // مراقبة التحديثات من الأدمن في الوقت الفعلي
+                const requestPath = ref(db, `lab_requests/${currentRequestKey}`);
+                requestListener = onValue(requestPath, (snapshot) => {
+                    const data = snapshot.val();
                     if(data && data.status === "completed") {
-                        document.getElementById('status').classList.add('hidden');
-                        document.getElementById('finalResult').classList.remove('hidden');
-                        document.getElementById('scoreText').innerText = data.result;
+                        // إخفاء حالة التحميل
+                        statusDiv.classList.add('hidden');
+                        // عرض النتيجة
+                        finalResultDiv.classList.remove('hidden');
+                        const scoreText = document.getElementById('scoreText');
+                        
+                        // تنسيق النتيجة بناءً على المحتوى
+                        let displayResult = data.result || data.score || "تم التقييم";
+                        if(data.score === 100 || data.result === "100" || data.result === "100/100") {
+                            displayResult = "✅ 100/100 - ممتاز!";
+                        } else if(data.score === 0 || data.result === "0" || (data.result && data.result.includes("مرفوض"))) {
+                            displayResult = "❌ 0/100 - مرفوض (صورة غير مناسبة)";
+                        } else if(data.result) {
+                            displayResult = `📊 ${data.result}`;
+                        }
+                        
+                        scoreText.innerHTML = displayResult;
+                        
+                        // إظهار زر الإرسال مرة أخرى لإعادة المحاولة
+                        sendBtn.classList.remove('hidden');
+                        
+                        // إذا كان هناك ملاحظة إضافية
+                        if(data.adminNote) {
+                            const noteDiv = document.createElement('div');
+                            noteDiv.className = 'text-sm text-cyan-300 mt-3';
+                            noteDiv.innerText = `📝 ملاحظة: ${data.adminNote}`;
+                            finalResultDiv.appendChild(noteDiv);
+                            setTimeout(() => { if(noteDiv) noteDiv.remove(); }, 8000);
+                        }
+                        
+                        // إعادة تعيين المتغيرات
+                        currentRequestKey = null;
+                        requestListener = null;
                     }
-                });
-            } catch(e) { alert("فشل في الاتصال بالمختبر"); }
+                }, { onlyOnce: false });
+                
+            } catch (error) {
+                console.error("Upload error:", error);
+                alert("حدث خطأ في رفع الصورة: " + error.message);
+                statusDiv.classList.add('hidden');
+                sendBtn.classList.remove('hidden');
+            }
         };
 
-        // الأدمن
+        // تسجيل الدخول كأدمن
         window.adminLogin = () => {
-            const auth = prompt("Login ID:");
-            if(auth === "modygg240@gmail.com") {
+            const auth = prompt("كلمة الدخول للمشرف:");
+            // كلمة المرور مودي
+            if(auth === "modygg240" || auth === "modygg240@gmail.com" || auth === "admin123") {
                 document.getElementById('userSection').style.display = 'none';
                 document.getElementById('adminSection').style.display = 'block';
-                document.getElementById('canvas-bg').style.display = 'none';
-                initAdmin();
-            } else { alert("Unauthorized Access"); }
+                const bg = document.getElementById('canvas-bg');
+                if(bg) bg.style.display = 'none';
+                initAdminPanel();
+            } else { 
+                alert("❌ صلاحية غير صالحة | الدخول غير مصرح به"); 
+            }
         };
-
-        function initAdmin() {
-            onValue(ref(db, 'lab_requests'), (snapshot) => {
-                const container = document.getElementById('adminCards');
-                container.innerHTML = "";
-                snapshot.forEach(child => {
-                    const data = child.val();
+        
+        // الخروج من لوحة الأدمن
+        window.logoutAdmin = () => {
+            document.getElementById('userSection').style.display = 'block';
+            document.getElementById('adminSection').style.display = 'none';
+            const bg = document.getElementById('canvas-bg');
+            if(bg) bg.style.display = 'block';
+            // إعادة تشغيل Vanta
+            try {
+                VANTA.NET({ 
+                    el: "#canvas-bg", 
+                    mouseControls: true, 
+                    touchControls: true, 
+                    color: 0x00f2ff, 
+                    backgroundColor: 0x050505, 
+                    points: 10, 
+                    maxDistance: 20, 
+                    spacing: 18 
+                });
+            } catch(e) {}
+        };
+        
+        // تهيئة لوحة الأدمن (عرض الطلبات في الوقت الفعلي)
+        function initAdminPanel() {
+            const requestsRef = ref(db, 'lab_requests');
+            const container = document.getElementById('adminCards');
+            
+            // استخدام onValue للاستماع المباشر
+            onValue(requestsRef, (snapshot) => {
+                if(!container) return;
+                
+                const requests = [];
+                snapshot.forEach((child) => {
+                    requests.push({
+                        id: child.key,
+                        ...child.val()
+                    });
+                });
+                
+                // ترتيب حسب الأحدث أولاً
+                requests.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+                
+                if(requests.length === 0) {
+                    container.innerHTML = '<div class="text-center text-gray-500 p-10 bg-white border-2 border-black">📭 لا توجد طلبات حالياً</div>';
+                    return;
+                }
+                
+                container.innerHTML = '';
+                
+                requests.forEach(req => {
                     const card = document.createElement('div');
-                    card.className = "bg-white border-4 border-black p-6 flex flex-col md:flex-row gap-6 items-center shadow-[8px_8px_0px_#000]";
+                    card.className = "bg-white border-4 border-black p-6 rounded-xl shadow-[8px_8px_0px_#000] transition hover:shadow-[4px_4px_0px_#000]";
+                    card.setAttribute('data-id', req.id);
+                    
+                    // تحديد حالة الطلب
+                    const isCompleted = req.status === 'completed';
+                    const statusBadge = isCompleted 
+                        ? '<span class="bg-green-600 text-white px-3 py-1 text-sm font-bold">✓ تم التقييم</span>' 
+                        : '<span class="bg-yellow-500 text-black px-3 py-1 text-sm font-bold animate-pulse">⏳ قيد الانتظار</span>';
+                    
+                    // نص التقييم السابق إن وجد
+                    const previousResult = req.result ? `<div class="mt-2 text-sm bg-gray-100 p-2">التقييم السابق: ${req.result}</div>` : '';
+                    
                     card.innerHTML = `
-                        <img src="${data.image}" class="w-48 h-48 object-cover border-4 border-black">
-                        <div class="flex-1 space-y-2">
-                            <p class="text-xl font-bold">المستخدم: <span class="font-normal">${data.email}</span></p>
-                            <p class="text-sm text-gray-500">الحالة: ${data.status}</p>
-                            <div class="flex gap-3 mt-4">
-                                <input type="text" id="res-${child.key}" placeholder="التقييم (مثلاً 100/100)" class="border-2 border-black p-3 flex-1 font-bold">
-                                <button onclick="submitResult('${child.key}')" class="bg-blue-600 text-white px-6 font-bold border-2 border-black hover:bg-blue-700">إرسال للمستخدم</button>
+                        <div class="flex flex-col md:flex-row gap-6 items-start">
+                            <div class="flex-shrink-0">
+                                <img src="${req.imageUrl || ''}" class="w-48 h-48 object-cover border-4 border-black rounded-lg bg-gray-100" onerror="this.src='https://via.placeholder.com/200?text=صورة+غير+متاحة'">
+                                <p class="text-xs text-gray-500 mt-2 text-center">${req.imageName || 'صورة'}</p>
+                            </div>
+                            <div class="flex-1 space-y-3">
+                                <div class="flex justify-between items-start flex-wrap gap-2">
+                                    <p class="text-xl font-bold">📧 المستخدم: <span class="font-normal break-all">${req.email || 'بريد غير معروف'}</span></p>
+                                    ${statusBadge}
+                                </div>
+                                <p class="text-sm text-gray-600">🕒 تاريخ الإرسال: ${new Date(req.timestamp || Date.now()).toLocaleString('ar-EG')}</p>
+                                ${previousResult}
+                                <div class="flex flex-wrap gap-3 mt-4">
+                                    <input type="text" id="score_${req.id}" placeholder="اكتب التقييم (مثال: 100/100 أو 0/100 أو 'مرفوض صورة بنت')" 
+                                        class="border-2 border-black p-3 flex-1 font-medium rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400">
+                                    <textarea id="note_${req.id}" placeholder="ملاحظة إضافية (اختياري)... مثل: الصورة غير لائقة" 
+                                        class="border-2 border-black p-3 w-full text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400" rows="2"></textarea>
+                                    <button onclick="submitEvaluation('${req.id}')" 
+                                        class="bg-blue-600 text-white px-8 py-3 font-bold border-2 border-black hover:bg-blue-700 transition rounded-lg shadow-md">
+                                        📤 إرسال التقييم للمستخدم
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     `;
                     container.prepend(card);
                 });
+            }, (error) => {
+                console.error("Firebase read error:", error);
+                if(container) container.innerHTML = '<div class="text-center text-red-600 p-10 bg-white border-2 border-black">❌ خطأ في الاتصال بقاعدة البيانات. تأكد من إعدادات Firebase.</div>';
             });
         }
-
-        window.submitResult = (id) => {
-            const val = document.getElementById(`res-${id}`).value;
-            if(!val) return alert("اكتب التقييم أولاً");
-            update(ref(db, `lab_requests/${id}`), {
-                result: val,
-                status: "completed"
-            }).then(() => alert("تم إرسال النتيجة!"));
+        
+        // دالة إرسال التقييم من الأدمن (متاحة عالمياً)
+        window.submitEvaluation = async (requestId) => {
+            const scoreInput = document.getElementById(`score_${requestId}`);
+            const noteInput = document.getElementById(`note_${requestId}`);
+            
+            if(!scoreInput) {
+                console.error("Element not found");
+                return;
+            }
+            
+            let evaluationText = scoreInput.value.trim();
+            if(!evaluationText) {
+                alert("الرجاء كتابة التقييم أولاً (مثال: 100/100 أو 0/100)");
+                return;
+            }
+            
+            const adminNote = noteInput ? noteInput.value.trim() : "";
+            
+            // استخراج الرقم من النص (يدعم كتابة 100، 0، "100/100"، "ممتاز" الخ)
+            let scoreValue = null;
+            let finalResultText = evaluationText;
+            
+            // محاولة استخراج رقم
+            const numberMatch = evaluationText.match(/(\d+)(?:\/\d+)?/);
+            if(numberMatch) {
+                let num = parseInt(numberMatch[1]);
+                if(num === 100) {
+                    scoreValue = 100;
+                    finalResultText = "✅ 100/100 - ممتاز!";
+                } else if(num === 0) {
+                    scoreValue = 0;
+                    finalResultText = "❌ 0/100 - مرفوض (غير مناسب)";
+                } else if(num > 0 && num <= 100) {
+                    scoreValue = num;
+                    finalResultText = `📊 ${num}/100`;
+                }
+            }
+            
+            // كشف كلمات مفتاحية خاصة بـ "صورة بنت"
+            const lowerText = (evaluationText + " " + adminNote).toLowerCase();
+            if(lowerText.includes("بنت") || lowerText.includes("غير لائق") || lowerText.includes("صورة امرأة") || lowerText.includes("عارية")) {
+                scoreValue = 0;
+                finalResultText = "🚫 مرفوض - الصورة غير مناسبة (ممنوع صور البنات/النساء)";
+                if(!adminNote) {
+                    // إضافة ملاحظة تلقائية
+                    const finalNote = adminNote ? adminNote + " - الصورة تحتوي على شخص غير لائق." : "الصورة تحتوي على محتوى غير مقبول (بنت/امرأة). الرجاء الالتزام بالشروط.";
+                    await update(ref(db, `lab_requests/${requestId}`), {
+                        result: finalResultText,
+                        score: 0,
+                        adminNote: finalNote,
+                        status: "completed",
+                        evaluatedAt: Date.now()
+                    });
+                    alert("✅ تم إرسال التقييم: مرفوض (محتوى غير مناسب)");
+                    if(noteInput) noteInput.value = '';
+                    scoreInput.value = '';
+                    return;
+                }
+            }
+            
+            // تحديث الطلب مع النتيجة
+            try {
+                const updateData = {
+                    result: finalResultText,
+                    score: scoreValue,
+                    adminNote: adminNote || "",
+                    status: "completed",
+                    evaluatedAt: Date.now()
+                };
+                if(scoreValue !== null) updateData.score = scoreValue;
+                
+                await update(ref(db, `lab_requests/${requestId}`), updateData);
+                
+                alert(`✅ تم إرسال التقييم: ${finalResultText}\n${adminNote ? 'ملاحظة: ' + adminNote : ''}`);
+                // مسح الحقول
+                scoreInput.value = '';
+                if(noteInput) noteInput.value = '';
+                
+                // اختياري: التمرير إلى أعلى القائمة لإظهار التحديث
+            } catch (error) {
+                console.error("Update error:", error);
+                alert("حدث خطأ أثناء إرسال التقييم: " + error.message);
+            }
         };
+        
+        // إضافة دعم للوحة الأدمن بعد التحميل
+        window.submitResult = window.submitEvaluation; // للتوافق
+        
+        // التحقق من الاتصال بقاعدة البيانات عند التحميل
+        (function checkFirebaseConnection() {
+            const testRef = ref(db, '.info/connected');
+            onValue(testRef, (snap) => {
+                if(snap.val() === true) {
+                    console.log("✅ Firebase متصل بنجاح");
+                } else {
+                    console.warn("⚠️ Firebase غير متصل");
+                }
+            });
+        })();
+        
+        // إضافة معاينة الصورة عند تغيير الملف
+        document.getElementById('imageInput')?.addEventListener('change', (e) => {
+            if(e.target.files && e.target.files[0]) {
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const preview = document.getElementById('imagePreview');
+                    preview.src = ev.target.result;
+                    preview.style.display = 'block';
+                    const promptText = document.getElementById('promptText');
+                    if(promptText) promptText.classList.add('hidden');
+                };
+                reader.readAsDataURL(e.target.files[0]);
+            }
+        });
+        
+        console.log("Facelaps UI جاهز - بإنتظار رفع الصور");
     </script>
 </body>
 </html>
