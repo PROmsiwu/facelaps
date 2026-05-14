@@ -5,7 +5,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<title>FACELAPS | Supabase</title>
+<title>FACELAPS AI</title>
 
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
@@ -42,7 +42,7 @@ text-shadow:0 0 15px #00f2ff;
 
 .preview{
 width:100%;
-height:260px;
+height:250px;
 object-fit:cover;
 border-radius:20px;
 border:2px solid cyan;
@@ -66,7 +66,7 @@ FACELAPS AI
 </h1>
 
 <input id="email"
-placeholder="email"
+placeholder="Email"
 class="w-full p-3 text-black mb-3 rounded">
 
 <input type="file" id="file" class="mb-3">
@@ -79,6 +79,11 @@ class="w-full bg-cyan-600 py-3 rounded font-bold">
 </button>
 
 <p id="status" class="text-center mt-3 text-cyan-300"></p>
+
+<button onclick="adminLogin()"
+class="w-full mt-5 text-sm text-gray-400 hover:text-cyan-400">
+Admin Login
+</button>
 
 </div>
 
@@ -114,7 +119,7 @@ const supabase = createClient(
 
 );
 
-// background
+// BACKGROUND
 VANTA.NET({
 el:"#bg",
 mouseControls:true,
@@ -125,80 +130,80 @@ points:9,
 spacing:18
 });
 
-// preview
+// PREVIEW IMAGE
 document.getElementById("file").addEventListener("change",(e)=>{
-const f=e.target.files[0];
-if(!f)return;
+const file=e.target.files[0];
+if(!file)return;
 
-const r=new FileReader();
-r.onload=ev=>{
+const reader=new FileReader();
+reader.onload=(ev)=>{
 document.getElementById("preview").src=ev.target.result;
 document.getElementById("preview").style.display="block";
-}
-r.readAsDataURL(f);
+};
+reader.readAsDataURL(file);
 });
 
-// UPLOAD
-window.upload = async ()=>{
+// UPLOAD FUNCTION
+window.upload = async () => {
 
-const file=document.getElementById("file").files[0];
-const email=document.getElementById("email").value;
+const file = document.getElementById("file").files[0];
+const email = document.getElementById("email").value;
 
-if(!file||!email){
+if (!file || !email) {
 alert("ادخل البيانات");
 return;
 }
 
-document.getElementById("status").innerText="جاري الرفع...";
+document.getElementById("status").innerText =
+"جاري الرفع...";
 
-const name=Date.now()+"_"+file.name;
+const fileName = Date.now() + "_" + file.name;
 
 // upload storage
-const {error:upErr}=await supabase.storage
+const { error: uploadError } = await supabase.storage
 .from("images")
-.upload(name,file);
+.upload(fileName, file);
 
-if(upErr){
-alert(upErr.message);
+if (uploadError) {
+alert(uploadError.message);
 return;
 }
 
-// url
-const {data:url}=supabase.storage
+// public url
+const { data: urlData } = supabase.storage
 .from("images")
-.getPublicUrl(name);
+.getPublicUrl(fileName);
 
 // save db
 await supabase.from("requests").insert([{
 email,
-image_url:url.publicUrl,
-status:"waiting",
-result:""
+image_url: urlData.publicUrl,
+status: "waiting",
+result: ""
 }]);
 
-document.getElementById("status").innerText="تم الإرسال ✅";
+document.getElementById("status").innerText =
+"تم الإرسال ✅";
 
-load();
+loadRequests();
 
 };
 
-// LOAD ADMIN
-async function load(){
+// LOAD REQUESTS
+async function loadRequests() {
 
-const {data}=await supabase
+const { data } = await supabase
 .from("requests")
 .select("*")
-.order("id",{ascending:false});
+.order("id", { ascending: false });
 
-const list=document.getElementById("list");
+const list = document.getElementById("list");
 
-if(!data)return;
+list.innerHTML = "";
 
-list.innerHTML="";
+data.forEach(r => {
 
-data.forEach(r=>{
-
-list.innerHTML+=`
+list.innerHTML += `
 
 <div class="bg-white text-black p-4 mb-4 rounded">
 
@@ -206,16 +211,18 @@ list.innerHTML+=`
 
 <p>${r.email}</p>
 
-<p>status: ${r.status}</p>
+<p>Status: ${r.status}</p>
 
-<input id="r_${r.id}" class="border p-2 w-full" placeholder="result">
+<input id="r_${r.id}"
+class="border p-2 w-full mb-2"
+placeholder="result">
 
 <button onclick="send(${r.id})"
-class="bg-blue-600 text-white px-3 py-1 mt-2">
+class="bg-blue-600 text-white px-3 py-1">
 Send
 </button>
 
-<p>${r.result||""}</p>
+<p class="mt-2">${r.result || ""}</p>
 
 </div>
 
@@ -225,39 +232,43 @@ Send
 
 }
 
-window.send = async(id)=>{
+window.send = async (id) => {
 
-const val=document.getElementById("r_"+id).value;
+const val = document.getElementById("r_" + id).value;
 
 await supabase.from("requests")
 .update({
-result:val,
-status:"done"
+result: val,
+status: "done"
 })
-.eq("id",id);
+.eq("id", id);
 
-load();
+loadRequests();
 
 };
 
-// ADMIN LOGIN (simple)
-window.admin=()=>{
+// ADMIN LOGIN
+window.adminLogin = () => {
 
-const p=prompt("password");
+const pass = prompt("password");
 
-if(p==="admin123"){
-document.getElementById("user").style.display="none";
+if (pass === "admin123") {
+
+document.getElementById("user").style.display = "none";
 document.getElementById("admin").classList.remove("hidden");
-load();
+
+loadRequests();
+
+} else {
+alert("wrong password");
 }
-else alert("wrong");
+
 };
 
-window.logout=()=>{
+// LOGOUT
+window.logout = () => {
 location.reload();
 };
-
-load();
 
 </script>
 
